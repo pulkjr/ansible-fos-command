@@ -234,7 +234,8 @@ messages:
 
 '''
 
-
+# Error found on FIPS Mode enabled Linux systems: [digital envelope routines: EVP_DigestInit_ex] disabled for FIPS
+# Found fix on https://stackoverflow.com/questions/67559170/paramiko-ssh-command-execution-failing-with-valueerror-digital-envelope-routi
 class _PkeyChild(paramiko.PKey):
     def get_fingerprint_improved(self):
         """
