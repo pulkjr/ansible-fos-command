@@ -6,6 +6,7 @@
 
 """ Ansible module to allow CLI commands to be run from inside of playbooks """
 
+from hashlib import md5
 import sys
 import time
 import socket
@@ -36,7 +37,7 @@ description:
     - CLI flags or when the system is asking for confirmation a la "Are you sure you want to reboot?"
     - Returning to the prompt indicated that the command has completed.
     - The module includes a configurable timeout value so that if an unexpected response comes from
-    - the switch, the module will not hang indefinately.
+    - the switch, the module will not hang indefinitely.
     - The module also provides the ability to indicate if the command has changed the state of the
     - switch.  Since some commands affirm on change and others affirm on no change, it is up to
     - the user to indicate when change has and has not occurred.  Brocade will be providing
@@ -87,7 +88,7 @@ options:
                     question:
                         description:
                             - Prompt string as displayed by the CLI typically captured in a screen scrape.
-                            - This string should be unambigouous and differentiated from other prompts.
+                            - This string should be unambiguous and differentiated from other prompts.
                         required: True
                     response:
                         description:
@@ -124,7 +125,7 @@ options:
                     test:
                         description:
                             - Prompt string as displayed by the CLI typically captured in a screen scrape.
-                            - This string should be unambigouous and differentiated from other prompts.
+                            - This string should be unambiguous and differentiated from other prompts.
                         required: True
                     flag:
                         description:
@@ -195,7 +196,7 @@ EXAMPLES = '''
         - command: ipfilter --clone ipv4_telnet_http -from default_ipv4
         - command: ipfilter --delrule ipv4_telnet_http -rule 2
         - command: ipfilter --addrule ipv4_telnet_http -rule 2 -sip any -dp 23 -proto tcp -act deny
-        - command: ipfilter --activate ipv4_telnet_http 
+        - command: ipfilter --activate ipv4_telnet_http
         - command: ipfilter --show
 
         - command: snmpconfig --set systemgroup
@@ -234,16 +235,24 @@ messages:
 '''
 
 
+class _PkeyChild(paramiko.PKey):
+    def get_fingerprint_improved(self):
+        """
+        Declare that the use of MD5 encryption is not for security purposes.
+        This declaration is to overcome connection to servers with FIPS security standards.
+        """
+        return md5(self.asbytes(), usedforsecurity=False).digest()
 
 def open_shell(module, ip_address, username, password, hostkeymust, messages, globaltimeout):
     changed = False
     failed = False
     messages.append("")
     messages.append("SSH into " + ip_address)
+    paramiko.PKey.get_fingerprint = _PkeyChild.get_fingerprint_improved
     ssh = paramiko.SSHClient()
     ssh.load_system_host_keys()
     if not hostkeymust:
-        ssh.set_missing_host_key_policy(paramiko.client.WarningPolicy())
+        ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
     try:
         ssh.connect(ip_address, username=username, password=password, timeout=globaltimeout)
     except paramiko.ssh_exception.AuthenticationException as exception:
@@ -348,7 +357,7 @@ def receive_until_match(module, messages, shell, match_array, exit_array, prompt
             if exit_array[i] in response_buffer:
                 exited = True
         if prompt_change:
-            prompt_match = re.search("\n[a-zA-Z0-9_.-]*:?[a-zA-Z_0-9]*:[a-zA-Z_0-9_.-]*>", \
+            prompt_match = re.search("\n[a-zA-Z0-9_.-]*?:?[a-zA-Z_0-9]*?:[a-zA-Z_0-9_.-]*?>\s*", \
                 response_buffer)
             if prompt_match is not None:
                 new_prompt = prompt_match.group()[1:]
@@ -395,9 +404,7 @@ def main(argv):
 
 
     argument_spec = dict(
-        switch_login=dict(type='str'),
-        switch_password=dict(type='str'),
-        switch_address=dict(type='str'),
+        credential=dict(required=True, type='dict', no_log=True),
         global_timeout=dict(type='int', default=15),
         command_set=dict(type='list', elements='dict', options=command_set_options),
         hostkeymust=dict(type='bool', default=False),
@@ -417,9 +424,9 @@ def main(argv):
     prompt_change_commands.append("setcontext")
 
     # Wrangle out the variables
-    switch_login = module.params['switch_login']
-    switch_password = module.params['switch_password']
-    switch_address = module.params['switch_address']
+    fos_user_name = module.params['credential']['fos_user_name']
+    fos_password = module.params['credential']['fos_password']
+    fos_ip_addr = module.params['credential']['fos_ip_addr']
     command_set = module.params['command_set']
     hostkeymust = module.params['hostkeymust']
     global_timeout = module.params['global_timeout']
@@ -428,7 +435,7 @@ def main(argv):
     result = {}
 
     # Establish session with switch
-    ssh, shell, changed, failed = open_shell(module, switch_address, switch_login, switch_password,
+    ssh, shell, changed, failed = open_shell(module, fos_ip_addr, fos_user_name, fos_password,
                                              hostkeymust, messages, global_timeout)
 
     # Discover prompt string
@@ -472,7 +479,7 @@ def main(argv):
             if prompt_change_commands[i] in command_set[command_index]['command']:
                 prompt_change = True
 
-        # Send the inital command line
+        # Send the initial command line
         send_characters(module, messages, shell, command_set[command_index]['command'] + "\n")
 
         # This loop will repeat until either the prompt or another exit string is found
